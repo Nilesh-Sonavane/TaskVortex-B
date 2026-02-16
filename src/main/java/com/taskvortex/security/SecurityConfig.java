@@ -52,6 +52,7 @@ public class SecurityConfig {
 
                         // 2. Allow Swagger (Optional)
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**").permitAll()
+                        .requestMatchers("/api/tasks/attachments/**").permitAll()
 
                         // 3. CRITICAL FIX: Allow Angular Frontend Resources
                         // This lets the browser load the app so the user CAN log in.

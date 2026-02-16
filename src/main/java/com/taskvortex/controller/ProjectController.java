@@ -98,4 +98,11 @@ public class ProjectController {
             return ResponseEntity.notFound().build();
         }
     }
+
+    // 7. GET Projects by Manager ID (Fixes 404 for /api/projects/manager/{id})
+    @GetMapping("/manager/{managerId}")
+    public ResponseEntity<List<ProjectResponse>> getProjectsByManager(@PathVariable Long managerId) {
+        List<ProjectResponse> projects = projectService.getProjectsByManagerId(managerId);
+        return ResponseEntity.ok(projects);
+    }
 }

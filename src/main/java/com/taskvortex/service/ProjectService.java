@@ -123,6 +123,13 @@ public class ProjectService {
         projectRepository.deleteById(id);
     }
 
+    public List<ProjectResponse> getProjectsByManagerId(Long managerId) {
+        return projectRepository.findByManagerId(managerId)
+                .stream()
+                .map(this::mapToResponse)
+                .toList();
+    }
+
     // --- HELPER: Map Entity to DTO ---
     private ProjectResponse mapToResponse(Project project) {
         return ProjectResponse.builder()

@@ -31,3 +31,7 @@ build/
 
 ### VS Code ###
 .vscode/
+
+
+# Ignore the data folder in the parent directory
+../taskvortex-data/
