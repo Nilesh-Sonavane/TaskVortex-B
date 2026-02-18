@@ -44,28 +44,20 @@ public class SecurityConfig {
         http
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 .csrf(csrf -> csrf.disable())
+                // CHANGE THIS SECTION:
+                .headers(headers -> headers
+                        .frameOptions(frame -> frame.disable()))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        // 1. Allow Public API Endpoints (Auth, etc.)
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/v1/auth/**").permitAll()
-
-                        // 2. Allow Swagger (Optional)
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**").permitAll()
                         .requestMatchers("/api/tasks/attachments/**").permitAll()
-
-                        // 3. CRITICAL FIX: Allow Angular Frontend Resources
-                        // This lets the browser load the app so the user CAN log in.
                         .requestMatchers("/", "/index.html", "/assets/**", "/*.js", "/*.css", "/*.ico", "/*.png",
                                 "/*.jpg", "/favicon.ico")
                         .permitAll()
-
-                        // 4. Handle "Deep Linking" (e.g., user refreshes on /login or /projects)
-                        // If you use the ForwardController, you usually need to permit non-API paths.
-                        // The safest way for a Single Page App is: "Secure /api, allow everything else"
-                        .requestMatchers("/api/**").authenticated() // Secure all other API calls
-                        .anyRequest().permitAll() // Allow everything else (Frontend routes)
-                );
+                        .requestMatchers("/api/**").authenticated()
+                        .anyRequest().permitAll());
 
         http.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 

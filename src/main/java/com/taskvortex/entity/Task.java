@@ -4,6 +4,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 import jakarta.persistence.CascadeType;
@@ -13,6 +14,7 @@ import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -50,17 +52,14 @@ public class Task {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private TaskStatus status = TaskStatus.PENDING; // Default status
+    private TaskStatus status = TaskStatus.PENDING;
 
-    // For simplicity right now, storing these as IDs.
-    // Later, you can change these to @ManyToOne relationships mapping to User and
-    // Project entities.
     @Column(name = "assignee_id")
     private Long assigneeId;
 
     @ManyToOne
     @JoinColumn(name = "project_id", nullable = false)
-    @JsonIgnoreProperties({ "members", "manager", "department", "description" }) // Keep the Task JSON light
+    @JsonIgnoreProperties({ "members", "manager", "department", "description" })
     private Project project;
 
     @ElementCollection
@@ -68,14 +67,30 @@ public class Task {
     @Column(name = "file_name")
     private List<String> attachments = new ArrayList<>();
 
-    // One task has many subtasks. CascadeType.ALL means if we save a Task, its
-    // Subtasks save automatically.
-    @OneToMany(mappedBy = "task", cascade = CascadeType.ALL, orphanRemoval = true)
-    private List<Subtask> subtasks = new ArrayList<>();
+    // --- SELF-REFERENCE LOGIC ---
 
-    // Helper method to link subtasks to this task automatically
-    public void addSubtask(Subtask subtask) {
+    /**
+     * Parent Task: If this is NOT null, this Task is a subtask.
+     */
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "parent_task_id", referencedColumnName = "id")
+    @JsonIgnore
+    private Task parentTask;
+
+    /**
+     * Subtasks: List of tasks that belong to this task.
+     */
+
+    @OneToMany(mappedBy = "parentTask", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Task> subtasks = new ArrayList<>();
+
+    public void addSubtask(Task subtask) {
+        if (this.parentTask != null) {
+            throw new RuntimeException("Hierarchy Error: A subtask cannot be a parent.");
+        }
         subtasks.add(subtask);
-        subtask.setTask(this);
+        subtask.setParentTask(this);
+        subtask.setProject(this.getProject());
     }
 }

@@ -1,6 +1,6 @@
 package com.taskvortex.entity;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
+import java.time.LocalDateTime;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -16,25 +16,26 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 @Entity
-@Table(name = "subtasks")
+@Table(name = "audit_logs")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public class Subtask {
-
+public class AuditLog {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(nullable = false)
-    private String title;
+    private String action;
+    private String entityName;
+    private Long entityId;
 
-    @Column(name = "is_completed")
-    private boolean isCompleted = false;
+    @Column(columnDefinition = "TEXT")
+    private String details;
 
-    // Many subtasks belong to one Task
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "task_id", nullable = false)
-    @JsonIgnore // Prevents infinite recursion when sending JSON back to Angular
-    private Task task;
+    // Link directly to the User table
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JoinColumn(name = "user_id")
+    private User performedBy;
+
+    private LocalDateTime timestamp = LocalDateTime.now();
 }
