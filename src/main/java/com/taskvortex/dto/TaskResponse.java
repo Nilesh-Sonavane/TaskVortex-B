@@ -13,7 +13,7 @@ public class TaskResponse {
     // Display names (for details page)
     private String project;
     private String assigneeName;
-
+    private String assigneeEmail;
     // Raw IDs (for form selection)
     private Long projectId;
     private Long assigneeId;

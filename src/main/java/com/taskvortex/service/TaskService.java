@@ -263,6 +263,7 @@ public class TaskService {
             userRepository.findById(task.getAssigneeId()).ifPresent(user -> {
                 String fullName = user.getFirstName() + " " + user.getLastName();
                 response.setAssigneeName(capitalizeName(fullName)); // Capitalize the name
+                response.setAssigneeEmail(user.getEmail());
             });
         }
 
