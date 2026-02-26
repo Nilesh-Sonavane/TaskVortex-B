@@ -165,4 +165,9 @@ public class ProjectService {
                         .collect(Collectors.toSet()))
                 .build();
     }
+
+    public List<Project> getProjectsByUserId(Long userId) {
+        // This assumes you have a custom query in your repository
+        return projectRepository.findAllByManagerIdOrMembersId(userId, userId);
+    }
 }

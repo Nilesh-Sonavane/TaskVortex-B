@@ -16,4 +16,5 @@ public interface TaskRepository extends JpaRepository<Task, Long> {
     // Keep this if you still need to find every single task regardless of level
     List<Task> findByProjectManagerId(Long managerId);
 
+    List<Task> findByAssigneeId(Long userId);
 }

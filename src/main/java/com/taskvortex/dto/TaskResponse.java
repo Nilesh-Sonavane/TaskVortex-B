@@ -17,6 +17,8 @@ public class TaskResponse {
     // Raw IDs (for form selection)
     private Long projectId;
     private Long assigneeId;
+    private String createdBy;
+    private String creatorEmail;
 
     // --- HIERARCHY TRACKING ---
     /**

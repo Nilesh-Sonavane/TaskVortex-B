@@ -28,6 +28,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
 
+        // FIX: Explicitly ignore OPTIONS requests so CORS pre-flight can succeed
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            response.setStatus(HttpServletResponse.SC_OK);
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         try {
             String authHeader = request.getHeader("Authorization");
             String token = null;
@@ -39,31 +46,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             }
 
             if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-
-                // 1. Validate Token First
                 if (jwtUtils.validateJwtToken(token)) {
-
                     UserDetails userDetails = userDetailsService.loadUserByUsername(username);
-
-                    // 2. Extract Role & Add "ROLE_" Prefix
-                    // This ensures "ADMIN" becomes "ROLE_ADMIN" for Spring Security
                     String role = jwtUtils.getRoleFromJwtToken(token);
                     if (role == null)
                         role = "EMPLOYEE";
 
-                    // Force Uppercase and Add Prefix
                     String roleAuthority = role.startsWith("ROLE_") ? role : "ROLE_" + role.toUpperCase();
-
                     SimpleGrantedAuthority authority = new SimpleGrantedAuthority(roleAuthority);
 
                     UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
-                            userDetails,
-                            null,
-                            Collections.singleton(authority));
+                            userDetails, null, Collections.singleton(authority));
 
                     authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-
-                    // 3. Set Context
                     SecurityContextHolder.getContext().setAuthentication(authToken);
                 }
             }

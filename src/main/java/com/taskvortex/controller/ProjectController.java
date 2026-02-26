@@ -63,6 +63,14 @@ public class ProjectController {
         }
     }
 
+    // Inside ProjectController.java
+
+    @GetMapping("/user/{userId}")
+    public ResponseEntity<List<Project>> getProjectsByUserId(@PathVariable Long userId) {
+        // This calls a new service method we will create below
+        return ResponseEntity.ok(projectService.getProjectsByUserId(userId));
+    }
+
     // 4. UPDATE Project Details (Fixes "Failed to Update" on Save)
     @PutMapping("/{id}")
     public ResponseEntity<ProjectResponse> updateProject(

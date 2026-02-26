@@ -1,8 +1,14 @@
 package com.taskvortex.entity;
 
 public enum TaskStatus {
-    PENDING,
-    IN_PROGRESS,
-    REVIEW,
-    DONE
+    NOT_STARTED,
+    DEPLOYMENT_IN_PROGRESS,
+    RE_DEPLOYMENT_IN_PROGRESS,
+    DEPLOYMENT_COMPLETE,
+    TESTING_IN_PROGRESS,
+    TESTING_COMPLETE,
+    RE_TESTING_IN_PROGRESS,
+    IN_UAT,
+    HOLD,
+    CANCELLED
 }

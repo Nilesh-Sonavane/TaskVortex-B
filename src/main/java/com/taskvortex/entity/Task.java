@@ -52,7 +52,7 @@ public class Task {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private TaskStatus status = TaskStatus.PENDING;
+    private TaskStatus status = TaskStatus.NOT_STARTED;
 
     @Column(name = "assignee_id")
     private Long assigneeId;

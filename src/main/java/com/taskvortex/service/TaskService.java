@@ -33,32 +33,22 @@ public class TaskService {
     private final Path root = Paths.get("").toAbsolutePath().getParent().getParent()
             .resolve("taskvortex-data").resolve("attachments").normalize();
 
-    /**
-     * Creates a task and logs it using the actual performer's email.
-     */
-
     @Transactional
     public Task createTask(Task task, List<MultipartFile> files, String userEmail) {
         if (task.getParentTask() != null) {
             throw new RuntimeException("Validation Error: Subtasks cannot have their own subtasks.");
         }
+
         if (task.getSubtasks() != null) {
             task.getSubtasks().forEach(sub -> {
                 sub.setParentTask(task);
                 sub.setProject(task.getProject());
-
-                // FORCE inheritance: If subtask has no assignee, use Parent's
-                // If Parent also has none (unlikely but possible), it remains null
-                if (sub.getAssigneeId() == null) {
+                if (sub.getAssigneeId() == null)
                     sub.setAssigneeId(task.getAssigneeId());
-                }
-                if (sub.getDueDate() == null) {
+                if (sub.getDueDate() == null)
                     sub.setDueDate(task.getDueDate());
-                }
-
-                // Ensure other defaults
                 if (sub.getStatus() == null)
-                    sub.setStatus(TaskStatus.PENDING);
+                    sub.setStatus(TaskStatus.NOT_STARTED);
                 if (sub.getPriority() == null)
                     sub.setPriority(task.getPriority());
             });
@@ -67,54 +57,49 @@ public class TaskService {
         handleFileUploads(task, files);
         Task savedTask = taskRepository.save(task);
 
-        String detail = (task.getParentTask() != null) ? "Subtask initialized" : "Main task initialized"; //
-
-        // Use dynamic userEmail to record the correct performer
-        auditService.logAction("TASK_CREATED", savedTask.getId(), detail, userEmail); //
+        String detail = "Main task initialized";
+        auditService.logAction("TASK_CREATED", savedTask.getId(), detail, userEmail);
 
         return savedTask;
     }
 
-    /**
-     * Updates task details and logs changes using the performer's User object.
-     */
-
     @Transactional
     public Task updateTask(Long id, Task taskDetails, List<MultipartFile> files, String currentEmail) {
-        // 1. Identify the task being edited and the performer
-        Task existing = taskRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Task not found"));
+        Task existing = taskRepository.findById(id).orElseThrow(() -> new RuntimeException("Task not found"));
         User performer = userRepository.findByEmail(currentEmail)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
         StringBuilder logBuilder = new StringBuilder("<ul class='audit-list'>");
 
-        // --- 2. GLOBAL SYNC IDENTIFICATION ---
-        // Rule: Parent and all Subtasks must share the same assignee.
-        // We find the "Root" parent to propagate changes everywhere.
+        // --- GLOBAL SYNC ---
         Task rootParent = (existing.getParentTask() != null) ? existing.getParentTask() : existing;
         Long newAssigneeId = taskDetails.getAssigneeId();
 
-        // --- 3. HANDLE FILE UPLOADS ---
+        // --- FILE UPLOADS ---
         List<String> newFileNames = handleFileUploads(existing, files);
-        for (String uniqueName : newFileNames) {
-            String originalName = uniqueName.contains("_") ? uniqueName.substring(uniqueName.indexOf("_") + 1)
-                    : uniqueName;
-
-            logBuilder.append("<li><i class='fa-solid fa-paperclip text-primary me-1'></i> ")
-                    .append("<b>Attachment:</b> Added ")
-                    .append("<a href='#' ")
-                    .append("class='history-attachment-link text-decoration-none' ")
-                    .append("data-filename='").append(uniqueName).append("'>")
-                    .append("<span class='badge-new'>").append(originalName).append("</span>")
-                    .append("</a></li>");
+        if (!newFileNames.isEmpty()) {
+            logBuilder.append("<li><i class='fa-solid fa-paperclip text-primary me-1'></i> <b>Files Added:</b> ");
+            for (String uniqueName : newFileNames) {
+                String originalName = uniqueName.contains("_") ? uniqueName.substring(uniqueName.lastIndexOf("_") + 1)
+                        : uniqueName;
+                logBuilder.append("<a href='javascript:void(0)' class='history-attachment-link' data-filename='")
+                        .append(uniqueName).append("'>").append(originalName).append("</a> ");
+            }
+            logBuilder.append("</li>");
         }
 
-        // --- 4. COMPARE FIELDS & LOG ASSIGNEE CHANGE ---
+        // --- TRACK ALL FIELDS ---
         autoCompare(logBuilder, "Title", existing.getTitle(), taskDetails.getTitle());
+        autoCompare(logBuilder, "Description",
+                existing.getDescription() == null ? "" : existing.getDescription(),
+                taskDetails.getDescription() == null ? "" : taskDetails.getDescription());
         autoCompare(logBuilder, "Status",
                 existing.getStatus().toString().replace("_", " "),
                 taskDetails.getStatus().toString().replace("_", " "));
+        autoCompare(logBuilder, "Priority", existing.getPriority().toString(), taskDetails.getPriority().toString());
+        autoCompare(logBuilder, "Due Date",
+                existing.getDueDate() != null ? existing.getDueDate().toString() : "None",
+                taskDetails.getDueDate() != null ? taskDetails.getDueDate().toString() : "None");
 
         if (!java.util.Objects.equals(existing.getAssigneeId(), newAssigneeId)) {
             String oldName = getMemberName(existing.getAssigneeId());
@@ -122,125 +107,97 @@ public class TaskService {
             autoCompare(logBuilder, "Assignee", oldName, newName);
         }
 
-        // --- 5. ENFORCE GLOBAL ASSIGNEE SYNC (Trickle Down & Bubble Up) ---
+        // --- ASSIGNEE SYNC ---
         rootParent.setAssigneeId(newAssigneeId);
         if (rootParent.getSubtasks() != null) {
-            for (Task sub : rootParent.getSubtasks()) {
-                sub.setAssigneeId(newAssigneeId);
-            }
+            rootParent.getSubtasks().forEach(sub -> sub.setAssigneeId(newAssigneeId));
         }
 
-        // --- 6. SMART SUBTASK CHECKLIST SYNC (If editing Parent) ---
-
+        // --- SUBTASK CHECKLIST LOGIC ---
         if (existing.getParentTask() == null && taskDetails.getSubtasks() != null) {
+            List<String> oldTitles = existing.getSubtasks().stream().map(Task::getTitle).toList();
+            List<String> newTitles = taskDetails.getSubtasks().stream().map(Task::getTitle).toList();
 
-            // 1. Create a list of current subtask titles to compare
-            List<String> oldTitles = existing.getSubtasks().stream()
-                    .map(Task::getTitle).toList();
-            List<String> newTitles = taskDetails.getSubtasks().stream()
-                    .map(Task::getTitle).toList();
+            List<String> added = newTitles.stream().filter(t -> !oldTitles.contains(t)).toList();
+            List<String> removed = oldTitles.stream().filter(t -> !newTitles.contains(t)).toList();
 
-            // 2. Only log if the titles or the count actually differ
-            boolean trulyChanged = !oldTitles.equals(newTitles);
-
-            if (trulyChanged) {
+            if (!added.isEmpty() || !removed.isEmpty()) {
                 existing.getSubtasks().clear();
                 for (Task sub : taskDetails.getSubtasks()) {
                     sub.setParentTask(existing);
                     sub.setProject(existing.getProject());
                     sub.setAssigneeId(newAssigneeId);
-
                     if (sub.getStatus() == null)
-                        sub.setStatus(com.taskvortex.entity.TaskStatus.PENDING);
+                        sub.setStatus(TaskStatus.NOT_STARTED);
                     if (sub.getPriority() == null)
                         sub.setPriority(existing.getPriority());
-
                     existing.getSubtasks().add(sub);
                 }
-                logBuilder.append(
-                        "<li><i class='fa-solid fa-list-check text-info me-1'></i> <b>Subtasks:</b> Checklist updated</li>");
+                logBuilder
+                        .append("<li><i class='fa-solid fa-list-check text-info me-1'></i> <b>Subtasks changed:</b> ");
+                if (!added.isEmpty())
+                    logBuilder.append("<span class='text-success'>added " + added + "</span> ");
+                if (!removed.isEmpty())
+                    logBuilder.append("<span class='text-danger'>removed " + removed + "</span>");
+                logBuilder.append("</li>");
             } else {
-                // If titles match, just sync the assignees without clearing the list
-                // This prevents the "Checklist updated" log from appearing unnecessarily
-                for (Task sub : existing.getSubtasks()) {
-                    sub.setAssigneeId(newAssigneeId);
-                }
+                existing.getSubtasks().forEach(sub -> sub.setAssigneeId(newAssigneeId));
             }
         }
 
-        // --- 7. APPLY CORE UPDATES TO THE CURRENT TASK ---
+        // --- APPLY UPDATES ---
         existing.setTitle(taskDetails.getTitle());
         existing.setDescription(taskDetails.getDescription());
         existing.setStatus(taskDetails.getStatus());
         existing.setPriority(taskDetails.getPriority());
         existing.setDueDate(taskDetails.getDueDate());
 
-        // --- 8. PERSIST AUDIT LOG ---
+        // --- PERSIST AUDIT LOG ---
         if (logBuilder.toString().contains("<li>")) {
             logBuilder.append("</ul>");
             Long targetLogId = (existing.getParentTask() != null) ? existing.getParentTask().getId() : id;
-            String finalDetails = (existing.getParentTask() != null)
-                    ? "<b>Subtask (" + existing.getTitle() + "):</b> " + logBuilder.toString()
-                    : logBuilder.toString();
-            auditService.logAction("TASK_EDITED", targetLogId, finalDetails, performer);
+            String prefix = (existing.getParentTask() != null) ? "<b>[Subtask: " + existing.getTitle() + "]</b> " : "";
+            auditService.logAction("TASK_EDITED", targetLogId, prefix + logBuilder.toString(), performer);
         }
 
-        // --- 9. FINAL PERSISTENCE ---
-        taskRepository.save(rootParent); // Ensure the sync is saved globally
+        taskRepository.save(rootParent);
         return taskRepository.save(existing);
     }
 
-    /**
-     * Compares old and new values to generate visual badges in the timeline.
-     */
     private void autoCompare(StringBuilder builder, String field, String oldVal, String newVal) {
-        // 1. Normalize nulls and trim to avoid logging changes based on extra spaces
         String safeOld = (oldVal == null) ? "" : oldVal.trim();
         String safeNew = (newVal == null) ? "" : newVal.trim();
 
-        // 2. Perform Case-Insensitive comparison
         if (!safeOld.equalsIgnoreCase(safeNew)) {
-
-            // 3. Optional: Shorten very long values (like Descriptions) for the log
-            String displayOld = formatForLog(safeOld);
-            String displayNew = formatForLog(safeNew);
+            String displayOld = safeOld.length() > 50 ? safeOld.substring(0, 47) + "..." : safeOld;
+            String displayNew = safeNew.length() > 50 ? safeNew.substring(0, 47) + "..." : safeNew;
 
             builder.append(String.format(
-                    "<li>" +
-                            "<b>%s:</b> " +
-                            "<span class='badge-old'>%s</span> " +
-                            "<i class='fa-solid fa-arrow-right mx-1'></i> " +
-                            "<span class='badge-new'>%s</span>" +
-                            "</li>",
-                    field,
-                    displayOld.isEmpty() ? "Empty" : displayOld,
-                    displayNew.isEmpty() ? "Empty" : displayNew));
+                    "<li><b>%s:</b> <span class='badge-old'>%s</span> <i class='fa-solid fa-arrow-right mx-1'></i> <span class='badge-new'>%s</span></li>",
+                    field, displayOld.isEmpty() ? "Empty" : displayOld, displayNew.isEmpty() ? "Empty" : displayNew));
         }
     }
 
-    /**
-     * Helper to ensure the Audit Log stays readable even if a description is long.
-     */
-    private String formatForLog(String val) {
-        if (val.length() > 50) {
-            return val.substring(0, 47) + "...";
+    @Transactional
+    public void removeAttachment(Long taskId, String filename, String userEmail) {
+        Task task = taskRepository.findById(taskId).orElseThrow(() -> new RuntimeException("Task not found"));
+        if (task.getAttachments() != null && task.getAttachments().remove(filename)) {
+            taskRepository.save(task);
+            String cleanName = filename.contains("_") ? filename.substring(filename.lastIndexOf("_") + 1) : filename;
+            String detail = "<ul class='audit-list'><li><i class='fa-solid fa-trash-can text-danger me-1'></i> <b>Attachment:</b> Removed <span class='badge-old'>"
+                    + cleanName + "</span></li></ul>";
+            Long targetId = (task.getParentTask() != null) ? task.getParentTask().getId() : taskId;
+            auditService.logAction("FILE_REMOVED", targetId, detail, userEmail);
         }
-        return val;
     }
-    // --- Data Mapping & Fetching Methods ---
 
     public List<TaskResponse> getTasksByManagerId(Long managerId) {
-        return taskRepository.findByProjectManagerId(managerId)
-                .stream()
-                .filter(t -> t.getParentTask() == null)
-                .map(this::mapToResponse)
-                .toList();
+        return taskRepository.findByProjectManagerId(managerId).stream().filter(t -> t.getParentTask() == null)
+                .map(this::mapToResponse).toList();
     }
 
     public TaskResponse getTaskById(Long id) {
-        Task task = taskRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Task not found"));
-        return mapToResponse(task);
+        return mapToResponse(taskRepository.findById(id).orElseThrow(() -> new RuntimeException("Task not found")));
     }
 
     private TaskResponse mapToResponse(Task task) {
@@ -251,88 +208,67 @@ public class TaskService {
         response.setStatus(task.getStatus() != null ? task.getStatus().name() : "PENDING");
         response.setPriority(task.getPriority() != null ? task.getPriority().name() : "MEDIUM");
         response.setDueDate(task.getDueDate() != null ? task.getDueDate().toString() : "");
-
-        if (task.getProject() != null) {
-            response.setProject(task.getProject().getName());
-            response.setProjectId(task.getProject().getId());
-        }
-
-        // FIX: Apply capitalization here so it reflects in the UI
+        response.setCreatedBy(
+                task.getProject().getManager().getFirstName() + " " + task.getProject().getManager().getLastName());
+        response.setCreatorEmail(task.getProject().getManager().getEmail());
+        response.setProject(task.getProject().getName());
+        response.setProjectId(task.getProject().getId());
+        response.setAttachments(task.getAttachments());
         if (task.getAssigneeId() != null) {
             response.setAssigneeId(task.getAssigneeId());
             userRepository.findById(task.getAssigneeId()).ifPresent(user -> {
-                String fullName = user.getFirstName() + " " + user.getLastName();
-                response.setAssigneeName(capitalizeName(fullName)); // Capitalize the name
+                response.setAssigneeName(capitalizeName(user.getFirstName() + " " + user.getLastName()));
                 response.setAssigneeEmail(user.getEmail());
             });
         }
-
-        if (task.getParentTask() != null) {
+        if (task.getParentTask() != null)
             response.setParentTaskId(task.getParentTask().getId());
-        }
-
-        response.setAttachments(task.getAttachments());
-
-        // This recursion ensures every subtask also gets its assigneeName mapped
-        if (task.getSubtasks() != null && !task.getSubtasks().isEmpty()) {
-            response.setSubtasks(task.getSubtasks().stream()
-                    .map(this::mapToResponse)
-                    .toList());
-        }
-
+        if (task.getSubtasks() != null)
+            response.setSubtasks(task.getSubtasks().stream().map(this::mapToResponse).toList());
         return response;
     }
 
     private List<String> handleFileUploads(Task task, List<MultipartFile> files) {
-        List<String> uploadedNames = new ArrayList<>(); // Track the new names
+        List<String> uploadedNames = new ArrayList<>();
+
         if (files != null && !files.isEmpty()) {
             List<String> currentAttachments = task.getAttachments();
-            if (currentAttachments == null)
+            if (currentAttachments == null) {
                 currentAttachments = new ArrayList<>();
+            }
 
             try {
-                if (!Files.exists(root))
+                // Ensure directory exists on your Dell machine
+                if (!Files.exists(root)) {
                     Files.createDirectories(root);
+                }
 
                 for (MultipartFile file : files) {
+                    // Simplified: UUID + Underscore + Original Name
                     String uniqueName = UUID.randomUUID().toString() + "_" + file.getOriginalFilename();
+
                     Files.copy(file.getInputStream(), this.root.resolve(uniqueName),
                             StandardCopyOption.REPLACE_EXISTING);
 
                     currentAttachments.add(uniqueName);
-                    uploadedNames.add(uniqueName); // Store for the audit log
+                    uploadedNames.add(uniqueName);
                 }
                 task.setAttachments(currentAttachments);
             } catch (IOException e) {
                 throw new RuntimeException("File storage error: " + e.getMessage());
             }
         }
-        return uploadedNames; // Return the list of unique names
+        return uploadedNames;
     }
 
-    @Transactional
-    public void removeAttachment(Long taskId, String filename, String userEmail) {
-        Task task = taskRepository.findById(taskId)
-                .orElseThrow(() -> new RuntimeException("Task not found"));
-
-        if (task.getAttachments() != null && task.getAttachments().remove(filename)) {
-            taskRepository.save(task);
-
-            String cleanName = filename.contains("_") ? filename.substring(filename.indexOf("_") + 1) : filename;
-
-            String detail = "<ul class='audit-list'><li><i class='fa-solid fa-trash-can text-danger me-1'></i> " +
-                    "<b>Attachment:</b> Removed <span class='badge-old'>" + cleanName + "</span></li></ul>";
-
-            Long targetId = (task.getParentTask() != null) ? task.getParentTask().getId() : taskId;
-            auditService.logAction("FILE_REMOVED", targetId, detail, userEmail);
-        }
+    public List<TaskResponse> getTasksByAssignee(Long userId) {
+        return taskRepository.findByAssigneeId(userId).stream().map(this::mapToResponse).toList();
     }
 
     private String getMemberName(Long userId) {
         if (userId == null)
             return "Unassigned";
-        return userRepository.findById(userId)
-                .map(u -> capitalizeName(u.getFirstName() + " " + u.getLastName()))
+        return userRepository.findById(userId).map(u -> capitalizeName(u.getFirstName() + " " + u.getLastName()))
                 .orElse("Unknown");
     }
 
@@ -340,14 +276,10 @@ public class TaskService {
         if (name == null || name.isBlank())
             return "";
         String[] words = name.toLowerCase().split("\\s+");
-        StringBuilder capitalized = new StringBuilder();
-        for (String word : words) {
-            if (!word.isEmpty()) {
-                capitalized.append(Character.toUpperCase(word.charAt(0)))
-                        .append(word.substring(1))
-                        .append(" ");
-            }
-        }
-        return capitalized.toString().trim();
+        StringBuilder sb = new StringBuilder();
+        for (String w : words)
+            if (!w.isEmpty())
+                sb.append(Character.toUpperCase(w.charAt(0))).append(w.substring(1)).append(" ");
+        return sb.toString().trim();
     }
 }
