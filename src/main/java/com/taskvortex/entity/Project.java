@@ -42,7 +42,6 @@ public class Project {
     private Integer progress = 0;
 
     private LocalDate startDate;
-    private LocalDate targetEndDate;
 
     // --- RELATIONSHIPS (FIXED FOR INFINITE LOOP) ---
 

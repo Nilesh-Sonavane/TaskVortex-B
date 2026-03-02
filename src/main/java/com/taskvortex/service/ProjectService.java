@@ -1,8 +1,8 @@
 package com.taskvortex.service;
 
+import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
@@ -11,10 +11,11 @@ import org.springframework.transaction.annotation.Transactional;
 import com.taskvortex.dto.MemberDTO;
 import com.taskvortex.dto.ProjectRequest;
 import com.taskvortex.dto.ProjectResponse;
-import com.taskvortex.entity.Department;
+import com.taskvortex.entity.AuditLog;
 import com.taskvortex.entity.Project;
 import com.taskvortex.entity.User;
-import com.taskvortex.repository.DepartmentRepository; // <--- Import this
+import com.taskvortex.entity.UserRole;
+import com.taskvortex.repository.AuditLogRepository;
 import com.taskvortex.repository.ProjectRepository;
 import com.taskvortex.repository.UserRepository;
 
@@ -24,150 +25,222 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class ProjectService {
 
-    private final ProjectRepository projectRepository;
-    private final UserRepository userRepository;
-    private final DepartmentRepository departmentRepository; // <--- Inject this
+        private final ProjectRepository projectRepository;
+        private final UserRepository userRepository;
+        private final AuditLogRepository auditLogRepository;
 
-    // --- 1. CREATE Project ---
-    @Transactional
-    public Project createProject(ProjectRequest request) {
-        if (projectRepository.existsByProjectKey(request.getKey())) {
-            throw new IllegalArgumentException("Project Key '" + request.getKey() + "' already exists.");
+        // --- 1. RETRIEVAL METHODS ---
+        public List<ProjectResponse> getAllProjects() {
+                return projectRepository.findAll().stream()
+                                .map(this::mapToResponse)
+                                .collect(Collectors.toList());
         }
 
-        User manager = userRepository.findById(request.getManagerId())
-                .orElseThrow(() -> new IllegalArgumentException("Manager not found"));
-
-        Project project = new Project();
-        project.setName(request.getName());
-        project.setProjectKey(request.getKey().toUpperCase());
-        project.setDescription(request.getDescription());
-        project.setStartDate(request.getStartDate());
-        project.setTargetEndDate(request.getEndDate());
-        project.setManager(manager);
-
-        // Default to manager's department if created via simple form
-        project.setDepartment(manager.getDepartment());
-
-        if (request.getMemberIds() != null && !request.getMemberIds().isEmpty()) {
-            List<User> membersList = userRepository.findAllById(request.getMemberIds());
-            Set<User> membersSet = new HashSet<>(membersList);
-            project.setMembers(membersSet);
+        public ProjectResponse getProjectById(Long id) {
+                Project project = projectRepository.findById(id)
+                                .orElseThrow(() -> new RuntimeException("Project not found with id: " + id));
+                return mapToResponse(project);
         }
 
-        return projectRepository.save(project);
-    }
+        // --- 2. CREATE PROJECT (Attributes action to performerId) ---
+        @Transactional
+        public Project createProject(ProjectRequest request, Long performerId) {
+                if (projectRepository.existsByProjectKey(request.getKey())) {
+                        throw new IllegalArgumentException("Project Key '" + request.getKey() + "' already exists.");
+                }
 
-    // --- 2. GET ALL Projects ---
-    public List<ProjectResponse> getAllProjects() {
-        List<Project> projects = projectRepository.findAll();
-        // Use the helper method to keep code clean
-        return projects.stream().map(this::mapToResponse).collect(Collectors.toList());
-    }
+                User performer = userRepository.findById(performerId)
+                                .orElseThrow(() -> new IllegalArgumentException("Action performer not found"));
 
-    // --- 3. GET SINGLE Project (For Edit Page) ---
-    public ProjectResponse getProjectById(Long id) {
-        Project project = projectRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Project not found"));
-        return mapToResponse(project);
-    }
+                User manager = userRepository.findById(request.getManagerId())
+                                .orElseThrow(() -> new IllegalArgumentException("Assigned manager not found"));
 
-    // --- 4. UPDATE Project (For Save Changes) ---
-    @Transactional
-    public ProjectResponse updateProject(Long id, ProjectRequest request) {
-        Project project = projectRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Project not found"));
+                Project project = new Project();
+                project.setName(request.getName());
+                project.setProjectKey(request.getKey().toUpperCase());
+                project.setDescription(request.getDescription());
+                project.setStartDate(request.getStartDate());
+                project.setManager(manager);
+                project.setDepartment(manager.getDepartment());
+                project.setStatus("ACTIVE");
 
-        // Update Basic Fields
-        project.setName(request.getName());
-        project.setDescription(request.getDescription());
-        project.setStartDate(request.getStartDate());
-        project.setTargetEndDate(request.getEndDate());
+                if (request.getMemberIds() != null && !request.getMemberIds().isEmpty()) {
+                        List<User> membersList = userRepository.findAllById(request.getMemberIds());
+                        project.setMembers(new HashSet<>(membersList));
+                }
 
-        if (request.getStatus() != null) {
-            project.setStatus(request.getStatus());
+                Project savedProject = projectRepository.save(project);
+
+                String createDetail = String.format("Project <b>%s</b> was created and assigned to manager <b>%s</b>.",
+                                savedProject.getName(), manager.getFirstName());
+
+                saveLog(performer, "CREATE", "PROJECTS", savedProject.getId(), createDetail);
+
+                return savedProject;
         }
 
-        // Update Manager
-        if (request.getManagerId() != null) {
-            User manager = userRepository.findById(request.getManagerId())
-                    .orElseThrow(() -> new IllegalArgumentException("Manager not found"));
-            project.setManager(manager);
+        // --- 3. UPDATE PROJECT ---
+        // --- 3. UPDATE PROJECT (Fixed Member Reset) ---
+        @Transactional
+        public ProjectResponse updateProject(Long id, ProjectRequest request, Long performerId) {
+                Project project = projectRepository.findById(id)
+                                .orElseThrow(() -> new RuntimeException("Project not found"));
+
+                User performer = userRepository.findById(performerId)
+                                .orElseThrow(() -> new IllegalArgumentException("Action performer not found"));
+
+                StringBuilder htmlChanges = new StringBuilder("<ul class='list-unstyled mb-0'>");
+                boolean isChanged = false;
+
+                // Name Change
+                if (!project.getName().equals(request.getName())) {
+                        htmlChanges.append(
+                                        String.format("<li>Name: <b>%s</b> &rarr; <b>%s</b></li>", project.getName(),
+                                                        request.getName()));
+                        project.setName(request.getName());
+                        isChanged = true;
+                }
+
+                // Manager Change
+                if (request.getManagerId() != null && !project.getManager().getId().equals(request.getManagerId())) {
+                        User newManager = userRepository.findById(request.getManagerId()).orElse(null);
+                        htmlChanges.append(String.format("<li>Manager: <b>%s</b> &rarr; <b>%s</b></li>",
+                                        project.getManager().getFirstName(), newManager.getFirstName()));
+                        project.setManager(newManager);
+
+                        // Optional: Update department to match new manager's department
+                        if (newManager != null) {
+                                project.setDepartment(newManager.getDepartment());
+                        }
+                        isChanged = true;
+                }
+
+                // --- THE FIX: Only clear members if a new list is provided ---
+                if (request.getMemberIds() != null) {
+                        // Fetch current member IDs to see if something actually changed
+                        List<Long> currentIds = project.getMembers().stream()
+                                        .map(User::getId)
+                                        .toList();
+
+                        // Check if the new list is different from the old list
+                        if (!new HashSet<>(currentIds).equals(new HashSet<>(request.getMemberIds()))) {
+                                List<User> updatedMembers = userRepository.findAllById(request.getMemberIds());
+                                project.getMembers().clear(); // Now safe to clear because we have the new data
+                                project.getMembers().addAll(updatedMembers);
+
+                                htmlChanges.append(
+                                                String.format("<li>Team members updated (Total: <b>%d</b>)</li>",
+                                                                updatedMembers.size()));
+                                isChanged = true;
+                        }
+                }
+
+                project.setDescription(request.getDescription());
+                project.setStartDate(request.getStartDate());
+
+                Project updatedProject = projectRepository.save(project);
+
+                if (isChanged) {
+                        htmlChanges.append("</ul>");
+                        saveLog(performer, "UPDATE", "PROJECTS", id, htmlChanges.toString());
+                }
+
+                return mapToResponse(updatedProject);
         }
 
-        // Update Department
-        if (request.getDepartmentId() != null) {
-            Department dept = departmentRepository.findById(request.getDepartmentId())
-                    .orElseThrow(() -> new IllegalArgumentException("Department not found"));
-            project.setDepartment(dept);
+        // --- 4. STATUS & DELETE ---
+        @Transactional
+        public Project updateStatus(Long id, String status, Long performerId) {
+                Project project = projectRepository.findById(id)
+                                .orElseThrow(() -> new IllegalArgumentException("Project not found"));
+                User performer = userRepository.findById(performerId)
+                                .orElseThrow(() -> new IllegalArgumentException("Performer not found"));
+
+                String oldStatus = project.getStatus();
+                project.setStatus(status);
+                Project saved = projectRepository.save(project);
+
+                String logHtml = String.format("Status changed: <b>%s</b> &rarr; <b>%s</b>", oldStatus, status);
+                saveLog(performer, "STATUS_CHANGE", "PROJECTS", id, logHtml);
+
+                return saved;
         }
 
-        Project updatedProject = projectRepository.save(project);
-        return mapToResponse(updatedProject);
-    }
+        @Transactional
+        public void deleteProject(Long id, Long performerId) {
+                Project project = projectRepository.findById(id)
+                                .orElseThrow(() -> new IllegalArgumentException("Project not found"));
+                User performer = userRepository.findById(performerId)
+                                .orElseThrow(() -> new IllegalArgumentException("Performer not found"));
 
-    // --- 5. ARCHIVE / RESTORE ---
-    @Transactional
-    public Project updateStatus(Long id, String status) {
-        Project project = projectRepository.findById(id)
-                .orElseThrow(() -> new IllegalArgumentException("Project not found"));
-        project.setStatus(status);
-        return projectRepository.save(project);
-    }
-
-    // --- 6. DELETE ---
-    public void deleteProject(Long id) {
-        if (!projectRepository.existsById(id)) {
-            throw new IllegalArgumentException("Project not found");
+                saveLog(performer, "DELETE", "PROJECTS", id, "Project <b>" + project.getName() + "</b> was deleted.");
+                projectRepository.deleteById(id);
         }
-        projectRepository.deleteById(id);
-    }
 
-    public List<ProjectResponse> getProjectsByManagerId(Long managerId) {
-        return projectRepository.findByManagerId(managerId)
-                .stream()
-                .map(this::mapToResponse)
-                .toList();
-    }
+        public List<ProjectResponse> getAccessibleProjects(String email) {
+                User user = userRepository.findByEmail(email)
+                                .orElseThrow(() -> new RuntimeException("User not found"));
 
-    // --- HELPER: Map Entity to DTO ---
-    private ProjectResponse mapToResponse(Project project) {
-        return ProjectResponse.builder()
-                // --- THESE ARE MISSING IN YOUR CODE ---
-                .id(project.getId())
-                .name(project.getName())
-                .projectKey(project.getProjectKey())
-                .description(project.getDescription())
-                .status(project.getStatus())
-                .progress(project.getProgress())
-                .startDate(project.getStartDate())
-                .targetEndDate(project.getTargetEndDate())
+                List<Project> projects;
 
-                // Handle Manager (Check for null to avoid crash)
-                .managerId(project.getManager() != null ? project.getManager().getId() : null)
-                .managerName(project.getManager() != null
-                        ? project.getManager().getFirstName() + " " + project.getManager().getLastName()
-                        : "Unknown")
+                if (user.getRole() == UserRole.ADMIN) {
+                        // Admins see everything
+                        projects = projectRepository.findAll();
+                } else if (user.getRole() == UserRole.MANAGER) {
+                        // Managers see projects they manage
+                        projects = projectRepository.findByManagerId(user.getId());
+                } else {
+                        // Employees see projects where they are members
+                        // Note: Using your existing repository method for member check
+                        projects = projectRepository.findAllByManagerIdOrMembersId(user.getId(), user.getId());
+                }
 
-                // Handle Department
-                .departmentId(project.getDepartment() != null ? project.getDepartment().getId() : null)
-                .departmentName(project.getDepartment() != null
-                        ? project.getDepartment().getName()
-                        : "General")
+                return projects.stream()
+                                .map(this::mapToResponse) // Corrected from mapToDTO
+                                .toList();
+        }
 
-                // --- THESE SEEM TO BE WORKING ALREADY ---
-                .membersCount(project.getMembers() != null ? project.getMembers().size() : 0)
-                .members(project.getMembers().stream().map(member -> MemberDTO.builder()
-                        .id(member.getId())
-                        .name(member.getFirstName() + " " + member.getLastName())
-                        .email(member.getEmail())
-                        .build())
-                        .collect(Collectors.toSet()))
-                .build();
-    }
+        // --- 5. HELPERS ---
+        private void saveLog(User user, String action, String entity, Long entityId, String details) {
+                AuditLog log = new AuditLog();
+                log.setAction(action);
+                log.setEntityName(entity);
+                log.setDetails(details);
+                log.setPerformedBy(user);
+                log.setTimestamp(LocalDateTime.now());
+                auditLogRepository.save(log);
+        }
 
-    public List<Project> getProjectsByUserId(Long userId) {
-        // This assumes you have a custom query in your repository
-        return projectRepository.findAllByManagerIdOrMembersId(userId, userId);
-    }
+        private ProjectResponse mapToResponse(Project project) {
+                return ProjectResponse.builder()
+                                .id(project.getId())
+                                .name(project.getName())
+                                .projectKey(project.getProjectKey())
+                                .description(project.getDescription())
+                                .status(project.getStatus())
+                                .progress(project.getProgress())
+                                .startDate(project.getStartDate())
+                                .managerId(project.getManager() != null ? project.getManager().getId() : null)
+                                .managerName(project.getManager() != null
+                                                ? project.getManager().getFirstName() + " "
+                                                                + project.getManager().getLastName()
+                                                : "Unknown")
+                                .departmentName(project.getDepartment() != null ? project.getDepartment().getName()
+                                                : "General")
+                                .members(project.getMembers().stream()
+                                                .map(m -> MemberDTO.builder().id(m.getId())
+                                                                .name(m.getFirstName() + " " + m.getLastName())
+                                                                .email(m.getEmail()).build())
+                                                .collect(Collectors.toSet()))
+                                .build();
+        }
+
+        public List<ProjectResponse> getProjectsByManagerId(Long managerId) {
+                return projectRepository.findByManagerId(managerId).stream().map(this::mapToResponse).toList();
+        }
+
+        public List<ProjectResponse> getProjectsByUserId(Long userId) {
+                return projectRepository.findAllByManagerIdOrMembersId(userId, userId).stream().map(this::mapToResponse)
+                                .toList();
+        }
 }

@@ -1,41 +1,32 @@
 package com.taskvortex.dto;
 
 import java.time.LocalDate;
-import java.util.Set;
+import java.util.List;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 @Data
 public class ProjectRequest {
-
     @NotBlank(message = "Project name is required")
-    @Size(min = 3, message = "Project name must be at least 3 characters")
     private String name;
 
-    // "key" is only required for CREATE, but for UPDATE it might be ignored or
-    // read-only
+    @NotBlank(message = "Project key is required")
     private String key;
 
     private String description;
 
-    @NotNull(message = "Project Manager is required")
+    @NotNull(message = "Manager is required")
     private Long managerId;
 
-    // --- NEW FIELDS NEEDED FOR EDIT PAGE ---
-    private Long departmentId; // <--- ADD THIS
-    private String status; // <--- ADD THIS (ACTIVE, ON_HOLD, etc.)
-    private Integer progress; // <--- ADD THIS (Optional, if you edit progress manually)
-    // ---------------------------------------
-
-    @NotNull(message = "Start Date is required")
+    @NotNull(message = "Start date is required")
     private LocalDate startDate;
 
-    @NotNull(message = "End Date is required")
+    // --- REMOVE @NotNull HERE ---
     private LocalDate endDate;
 
-    // We receive a list of User IDs from the frontend checkboxes
-    private Set<Long> memberIds;
+    private Long departmentId;
+    private String status;
+    private List<Long> memberIds;
 }

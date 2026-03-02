@@ -18,23 +18,21 @@ public class AuditService {
     private final AuditLogRepository auditLogRepository;
     private final UserRepository userRepository;
 
-    // Method for User object (Used in updateTask)
-    public void logAction(String action, Long entityId, String details, User performer) {
-        saveLog(action, entityId, details, performer);
+    // Updated: Now accepts entityName (e.g., "USERS" or "TASKS")
+    public void logAction(String entityName, String action, Long entityId, String details, User performer) {
+        saveLog(entityName, action, entityId, details, performer);
     }
 
-    // Method for String Email/Label (Used in createTask and removeAttachment)
-    // This fixes your "Java(67108979)" compilation error
-    public void logAction(String action, Long entityId, String details, String performerInfo) {
+    // Updated: Now accepts entityName and String performerInfo
+    public void logAction(String entityName, String action, Long entityId, String details, String performerInfo) {
         User performer = userRepository.findByEmail(performerInfo).orElse(null);
-        saveLog(action, entityId, details, performer);
+        saveLog(entityName, action, entityId, details, performer);
     }
 
-    private void saveLog(String action, Long entityId, String details, User performer) {
+    private void saveLog(String entityName, String action, Long entityId, String details, User performer) {
         AuditLog log = new AuditLog();
+        log.setEntityName(entityName); // Dynamically set from parameter
         log.setAction(action);
-        log.setEntityName("Task");
-        log.setEntityId(entityId);
         log.setDetails(details);
         log.setPerformedBy(performer);
         log.setTimestamp(LocalDateTime.now());

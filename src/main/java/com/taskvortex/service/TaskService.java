@@ -58,7 +58,7 @@ public class TaskService {
         Task savedTask = taskRepository.save(task);
 
         String detail = "Main task initialized";
-        auditService.logAction("TASK_CREATED", savedTask.getId(), detail, userEmail);
+        auditService.logAction("TASKS", "TASK_CREATED", savedTask.getId(), detail, userEmail);
 
         return savedTask;
     }
@@ -157,7 +157,7 @@ public class TaskService {
             logBuilder.append("</ul>");
             Long targetLogId = (existing.getParentTask() != null) ? existing.getParentTask().getId() : id;
             String prefix = (existing.getParentTask() != null) ? "<b>[Subtask: " + existing.getTitle() + "]</b> " : "";
-            auditService.logAction("TASK_EDITED", targetLogId, prefix + logBuilder.toString(), performer);
+            auditService.logAction("Tasks", "TASK_EDITED", targetLogId, prefix + logBuilder.toString(), performer);
         }
 
         taskRepository.save(rootParent);
@@ -187,7 +187,7 @@ public class TaskService {
             String detail = "<ul class='audit-list'><li><i class='fa-solid fa-trash-can text-danger me-1'></i> <b>Attachment:</b> Removed <span class='badge-old'>"
                     + cleanName + "</span></li></ul>";
             Long targetId = (task.getParentTask() != null) ? task.getParentTask().getId() : taskId;
-            auditService.logAction("FILE_REMOVED", targetId, detail, userEmail);
+            auditService.logAction("TASKS", "FILE_REMOVED", targetId, detail, userEmail);
         }
     }
 

@@ -57,6 +57,9 @@ public class User implements UserDetails {
     @Column(nullable = false)
     private UserRole role;
 
+    @Column(nullable = false)
+    private boolean active = true; // Default to active
+
     // --- SPRING SECURITY METHODS ---
 
     @Override

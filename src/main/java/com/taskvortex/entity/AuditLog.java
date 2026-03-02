@@ -27,7 +27,6 @@ public class AuditLog {
 
     private String action;
     private String entityName;
-    private Long entityId;
 
     @Column(columnDefinition = "TEXT")
     private String details;

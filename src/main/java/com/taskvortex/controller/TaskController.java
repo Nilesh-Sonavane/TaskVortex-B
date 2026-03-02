@@ -24,6 +24,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.taskvortex.dto.TaskResponse;
@@ -71,12 +72,13 @@ public class TaskController {
 
     @GetMapping("/{id}/history")
     public ResponseEntity<List<AuditLog>> getTaskHistory(@PathVariable Long id) {
-        Task task = taskRepository.findById(id).orElseThrow();
-        if (task.getParentTask() != null) {
-            return ResponseEntity.ok(auditLogRepository.findByEntityIdInAndEntityNameOrderByTimestampDesc(
-                    List.of(id, task.getParentTask().getId()), "Task"));
-        }
-        return ResponseEntity.ok(auditLogRepository.findByEntityIdAndEntityNameOrderByTimestampDesc(id, "Task"));
+        // We check if the task exists first for validation
+        taskRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Task not found"));
+
+        // Since entityId is removed, we can only fetch logs by the Entity Name "TASKS"
+        // This will return the history of ALL tasks, newest first
+        return ResponseEntity.ok(auditLogRepository.findByEntityNameOrderByTimestampDesc("TASKS"));
     }
 
     @PutMapping("/{id}")

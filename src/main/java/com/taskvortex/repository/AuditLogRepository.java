@@ -9,8 +9,9 @@ import com.taskvortex.entity.AuditLog;
 
 @Repository
 public interface AuditLogRepository extends JpaRepository<AuditLog, Long> {
-    // Fetch history for a specific task, newest first
-    List<AuditLog> findByEntityIdAndEntityNameOrderByTimestampDesc(Long entityId, String entityName);
 
-    List<AuditLog> findByEntityIdInAndEntityNameOrderByTimestampDesc(List<Long> entityIds, String entityName);
+    List<AuditLog> findByEntityNameOrderByTimestampDesc(String entityName);
+
+    // List<AuditLog> findByEntityIdInAndEntityNameOrderByTimestampDesc(List<Long>
+    // entityIds, String entityName);
 }
