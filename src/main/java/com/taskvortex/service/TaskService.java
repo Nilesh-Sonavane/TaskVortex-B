@@ -157,7 +157,7 @@ public class TaskService {
             logBuilder.append("</ul>");
             Long targetLogId = (existing.getParentTask() != null) ? existing.getParentTask().getId() : id;
             String prefix = (existing.getParentTask() != null) ? "<b>[Subtask: " + existing.getTitle() + "]</b> " : "";
-            auditService.logAction("Tasks", "TASK_EDITED", targetLogId, prefix + logBuilder.toString(), performer);
+            auditService.logAction("TASKS", "TASK_EDITED", targetLogId, prefix + logBuilder.toString(), performer);
         }
 
         taskRepository.save(rootParent);

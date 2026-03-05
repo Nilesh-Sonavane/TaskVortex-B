@@ -37,7 +37,7 @@ public class DepartmentService {
         // Saving as HTML for consistent UI rendering
         String details = String.format("New Department <b>%s</b> was created.", saved.getName());
 
-        saveLog(performer, "CREATE", "DEPARTMENTS", details);
+        saveLog(performer, "CREATE", "DEPARTMENTS", saved.getId(), details);
         return saved;
     }
 
@@ -60,7 +60,7 @@ public class DepartmentService {
         departmentRepository.deleteById(id);
 
         String logDetails = String.format("Department <b>%s</b> was permanently deleted.", dept.getName());
-        saveLog(performer, "DELETE", "DEPARTMENTS", logDetails);
+        saveLog(performer, "DELETE", "DEPARTMENTS", id, logDetails);
     }
 
     @Transactional
@@ -84,7 +84,7 @@ public class DepartmentService {
             // Save HTML Log with a clear change arrow
             User performer = userRepository.findByEmail(userEmail).orElse(null);
             String details = String.format("Department name changed: <b>%s</b> &rarr; <b>%s</b>", oldName, newName);
-            saveLog(performer, "UPDATE", "DEPARTMENTS", details);
+            saveLog(performer, "UPDATE", "DEPARTMENTS", updated.getId(), details);
 
             return updated;
         }
@@ -92,11 +92,12 @@ public class DepartmentService {
         return existingDept; // No changes made
     }
 
-    private void saveLog(User user, String action, String entity, String details) {
+    private void saveLog(User user, String action, String entity, Long entityId, String details) {
         AuditLog log = new AuditLog();
         log.setAction(action);
         log.setEntityName(entity);
-        log.setDetails(details); // This now contains the <b> tags
+        log.setEntityId(entityId);
+        log.setDetails(details);
         log.setPerformedBy(user);
         log.setTimestamp(LocalDateTime.now());
         auditLogRepository.save(log);

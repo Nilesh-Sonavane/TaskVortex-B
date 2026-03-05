@@ -61,7 +61,7 @@ public class UserService {
                 .append(dept.getName()).append("</li>")
                 .append("</ul>");
 
-        auditService.logAction("USERS", "USER_REGISTRATION", null, logBuilder.toString(), performerEmail);
+        auditService.logAction("USERS", "USER_REGISTRATION", savedUser.getId(), logBuilder.toString(), performerEmail);
         return savedUser;
     }
 
@@ -113,7 +113,7 @@ public class UserService {
         if (logBuilder.toString().contains("<li>")) {
             logBuilder.append("</ul>");
             String targetHeader = "<b>[Profile Update: " + existing.getEmail() + "]</b> ";
-            auditService.logAction("USERS", "USER_UPDATED", null, targetHeader + logBuilder.toString(), performerEmail);
+            auditService.logAction("USERS", "USER_UPDATED", id, targetHeader + logBuilder.toString(), performerEmail);
         }
 
         return userRepository.save(existing);
@@ -142,7 +142,7 @@ public class UserService {
                 color, user.getEmail(), status);
 
         // 5. Pass the 'performer' entity, NOT just the email string
-        auditService.logAction("USERS", "USER_STATUS_TOGGLE", null, logDetails, performer);
+        auditService.logAction("USERS", "USER_STATUS_TOGGLE", id, logDetails, performer);
     }
 
     // --- HELPER: Auto Compare (Mirroring TaskService logic) ---

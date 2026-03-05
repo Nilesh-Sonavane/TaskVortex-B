@@ -18,12 +18,10 @@ public class AuditService {
     private final AuditLogRepository auditLogRepository;
     private final UserRepository userRepository;
 
-    // Updated: Now accepts entityName (e.g., "USERS" or "TASKS")
     public void logAction(String entityName, String action, Long entityId, String details, User performer) {
         saveLog(entityName, action, entityId, details, performer);
     }
 
-    // Updated: Now accepts entityName and String performerInfo
     public void logAction(String entityName, String action, Long entityId, String details, String performerInfo) {
         User performer = userRepository.findByEmail(performerInfo).orElse(null);
         saveLog(entityName, action, entityId, details, performer);
@@ -31,8 +29,9 @@ public class AuditService {
 
     private void saveLog(String entityName, String action, Long entityId, String details, User performer) {
         AuditLog log = new AuditLog();
-        log.setEntityName(entityName); // Dynamically set from parameter
+        log.setEntityName(entityName);
         log.setAction(action);
+        log.setEntityId(entityId);
         log.setDetails(details);
         log.setPerformedBy(performer);
         log.setTimestamp(LocalDateTime.now());

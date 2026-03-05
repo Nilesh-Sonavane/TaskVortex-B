@@ -184,19 +184,18 @@ public class ProjectService {
                 List<Project> projects;
 
                 if (user.getRole() == UserRole.ADMIN) {
-                        // Admins see everything
+                        // 1. ADMIN: Can access absolutely everything
                         projects = projectRepository.findAll();
                 } else if (user.getRole() == UserRole.MANAGER) {
-                        // Managers see projects they manage
-                        projects = projectRepository.findByManagerId(user.getId());
-                } else {
-                        // Employees see projects where they are members
-                        // Note: Using your existing repository method for member check
+                        // 2. MANAGER: Projects they manage OR where they are added as a member
                         projects = projectRepository.findAllByManagerIdOrMembersId(user.getId(), user.getId());
+                } else {
+                        // 3. EMPLOYEE: Only projects where they are explicitly added as a member
+                        projects = projectRepository.findByMembersId(user.getId());
                 }
 
                 return projects.stream()
-                                .map(this::mapToResponse) // Corrected from mapToDTO
+                                .map(this::mapToResponse)
                                 .toList();
         }
 
@@ -205,6 +204,7 @@ public class ProjectService {
                 AuditLog log = new AuditLog();
                 log.setAction(action);
                 log.setEntityName(entity);
+                log.setEntityId(entityId);
                 log.setDetails(details);
                 log.setPerformedBy(user);
                 log.setTimestamp(LocalDateTime.now());
