@@ -121,4 +121,9 @@ public class TaskController {
     public ResponseEntity<List<TaskResponse>> getTasksByAssignee(@PathVariable Long userId) {
         return ResponseEntity.ok(taskService.getTasksByAssignee(userId));
     }
+
+    @GetMapping("/user/{userId}/count")
+    public ResponseEntity<Long> getTaskCount(@PathVariable Long userId) {
+        return ResponseEntity.ok(taskService.getActiveTaskCount(userId));
+    }
 }

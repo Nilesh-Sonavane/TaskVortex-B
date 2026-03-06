@@ -282,4 +282,8 @@ public class TaskService {
                 sb.append(Character.toUpperCase(w.charAt(0))).append(w.substring(1)).append(" ");
         return sb.toString().trim();
     }
+
+    public long getActiveTaskCount(Long userId) {
+        return taskRepository.countActiveTasksByUserId(userId);
+    }
 }
