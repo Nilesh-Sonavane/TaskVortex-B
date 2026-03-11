@@ -126,4 +126,16 @@ public class TaskController {
     public ResponseEntity<Long> getTaskCount(@PathVariable Long userId) {
         return ResponseEntity.ok(taskService.getActiveTaskCount(userId));
     }
+
+    @GetMapping("/board/filter")
+    public ResponseEntity<List<TaskResponse>> getBoardTasks(
+            @RequestParam(required = false) List<Long> projectIds,
+            @RequestParam(required = false) List<Long> assigneeIds,
+            @RequestParam(required = false) List<String> statuses,
+            @RequestParam(required = false) List<String> departments,
+            @RequestParam(required = false) String searchTerm) {
+
+        return ResponseEntity
+                .ok(taskService.getFilteredBoardTasks(projectIds, assigneeIds, statuses, departments, searchTerm));
+    }
 }

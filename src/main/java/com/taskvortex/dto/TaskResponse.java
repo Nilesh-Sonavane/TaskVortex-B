@@ -16,6 +16,8 @@ public class TaskResponse {
     private String assigneeEmail;
     // Raw IDs (for form selection)
     private Long projectId;
+    private String projectKey;
+    private String dept;
     private Long assigneeId;
     private String createdBy;
     private String creatorEmail;

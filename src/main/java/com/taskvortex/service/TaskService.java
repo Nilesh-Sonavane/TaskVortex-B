@@ -191,6 +191,27 @@ public class TaskService {
         }
     }
 
+    @Transactional
+    public List<TaskResponse> getFilteredBoardTasks(List<Long> projectIds, List<Long> assigneeIds,
+            List<String> statusStrings, List<String> departments, String searchTerm) {
+
+        // Convert status strings from UI to Enums; empty list becomes NULL for the
+        // Repository
+        List<TaskStatus> statuses = (statusStrings != null && !statusStrings.isEmpty())
+                ? statusStrings.stream().map(TaskStatus::valueOf).toList()
+                : null;
+
+        List<Long> pIds = (projectIds != null && !projectIds.isEmpty()) ? projectIds : null;
+        List<Long> aIds = (assigneeIds != null && !assigneeIds.isEmpty()) ? assigneeIds : null;
+        String search = (searchTerm != null && !searchTerm.isBlank()) ? searchTerm.toLowerCase() : null;
+        List<String> depts = (departments != null && !departments.isEmpty()) ? departments : null;
+
+        return taskRepository.findBoardTasks(pIds, aIds, statuses, depts, search)
+                .stream()
+                .map(this::mapToResponse)
+                .toList();
+    }
+
     public List<TaskResponse> getTasksByManagerId(Long managerId) {
         return taskRepository.findByProjectManagerId(managerId).stream().filter(t -> t.getParentTask() == null)
                 .map(this::mapToResponse).toList();
@@ -206,6 +227,17 @@ public class TaskService {
         response.setTitle(task.getTitle());
         response.setDescription(task.getDescription());
         response.setStatus(task.getStatus() != null ? task.getStatus().name() : "PENDING");
+        if (task.getProject() != null) {
+            response.setProject(task.getProject().getName());
+            response.setProjectId(task.getProject().getId());
+            response.setProjectKey(task.getProject().getProjectKey());
+
+            // DYNAMIC DEPT ASSIGNMENT: Pulling from the Project
+            String dept = (task.getProject().getDepartment() != null)
+                    ? task.getProject().getDepartment().getName()
+                    : "General";
+            response.setDept(dept);
+        }
         response.setPriority(task.getPriority() != null ? task.getPriority().name() : "MEDIUM");
         response.setDueDate(task.getDueDate() != null ? task.getDueDate().toString() : "");
         response.setCreatedBy(
