@@ -8,6 +8,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -57,7 +58,7 @@ public class TaskService {
         handleFileUploads(task, files);
         Task savedTask = taskRepository.save(task);
 
-        String detail = "Main task initialized";
+        String detail = "<b>" + task.getTitle() + "</b> task initialized";
         auditService.logAction("TASKS", "TASK_CREATED", savedTask.getId(), detail, userEmail);
 
         return savedTask;
@@ -219,6 +220,15 @@ public class TaskService {
 
     public TaskResponse getTaskById(Long id) {
         return mapToResponse(taskRepository.findById(id).orElseThrow(() -> new RuntimeException("Task not found")));
+    }
+
+    public List<TaskResponse> getAllTasks() {
+        List<Task> tasks = taskRepository.findAll();
+
+        // Use your existing mapToResponse method instead of new TaskResponse(task)
+        return tasks.stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
     }
 
     private TaskResponse mapToResponse(Task task) {

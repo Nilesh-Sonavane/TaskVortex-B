@@ -138,4 +138,15 @@ public class TaskController {
         return ResponseEntity
                 .ok(taskService.getFilteredBoardTasks(projectIds, assigneeIds, statuses, departments, searchTerm));
     }
+
+    @GetMapping("/activity/global")
+    public ResponseEntity<List<AuditLog>> getGlobalActivity() {
+        // Gets the latest history for all tasks
+        return ResponseEntity.ok(auditLogRepository.findAllByOrderByTimestampDesc());
+    }
+
+    @GetMapping
+    public ResponseEntity<List<TaskResponse>> getAllTasks() {
+        return ResponseEntity.ok(taskService.getAllTasks());
+    }
 }
