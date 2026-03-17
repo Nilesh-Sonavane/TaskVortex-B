@@ -45,6 +45,11 @@ public class User implements UserDetails {
     @Column(unique = true, nullable = false)
     private String email;
 
+    private String phone;
+
+    @Column(length = 500)
+    private String bio;
+
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "department_id")
     private Department department;
@@ -59,6 +64,10 @@ public class User implements UserDetails {
 
     @Column(nullable = false)
     private boolean active = true; // Default to active
+
+    private String location;
+
+    private String profileUrl;
 
     // --- SPRING SECURITY METHODS ---
 

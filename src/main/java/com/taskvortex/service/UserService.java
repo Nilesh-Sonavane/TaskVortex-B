@@ -6,8 +6,10 @@ import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
+import com.taskvortex.dto.ChangePasswordDTO;
 import com.taskvortex.dto.UserRequestDTO;
 import com.taskvortex.dto.UserResponseDTO;
 import com.taskvortex.entity.Department;
@@ -27,6 +29,9 @@ public class UserService {
     private final DepartmentRepository departmentRepository;
     private final PasswordEncoder passwordEncoder;
     private final AuditService auditService;
+
+    // 1. ADD THIS INJECTION
+    private final FileStorageService fileStorageService;
 
     // --- 1. CREATE USER ---
     @Transactional
@@ -80,7 +85,6 @@ public class UserService {
 
         StringBuilder logBuilder = new StringBuilder("<ul class='audit-list'>");
 
-        // Compare and track changes
         autoCompareUsers(logBuilder, "First Name", existing.getFirstName(), dto.getFirstName());
         autoCompareUsers(logBuilder, "Last Name", existing.getLastName(), dto.getLastName());
 
@@ -96,20 +100,17 @@ public class UserService {
 
         autoCompareUsers(logBuilder, "Job Title", existing.getJobTitle(), dto.getJobTitle());
 
-        // Update fields
         existing.setFirstName(dto.getFirstName());
         existing.setLastName(dto.getLastName());
         existing.setRole(newRole);
         existing.setJobTitle(dto.getJobTitle());
 
-        // Only update password if a new one is provided
         if (dto.getPassword() != null && !dto.getPassword().isBlank()) {
             existing.setPassword(passwordEncoder.encode(dto.getPassword()));
             logBuilder.append(
                     "<li><i class='fa-solid fa-key text-warning me-1'></i> <b>Security:</b> Password was reset</li>");
         }
 
-        // Persist log if changes occurred
         if (logBuilder.toString().contains("<li>")) {
             logBuilder.append("</ul>");
             String targetHeader = "<b>[Profile Update: " + existing.getEmail() + "]</b> ";
@@ -121,19 +122,15 @@ public class UserService {
 
     @Transactional
     public void toggleUserStatus(Long id, String performerEmail) {
-        // 1. Fetch the user being toggled
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
 
-        // 2. IMPORTANT: Fetch the performer entity to ensure AuditService works
         User performer = userRepository.findByEmail(performerEmail)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Performer not found"));
 
-        // 3. Flip the status
         user.setActive(!user.isActive());
         userRepository.save(user);
 
-        // 4. Prepare logs
         String status = user.isActive() ? "Activated" : "Deactivated";
         String color = user.isActive() ? "text-success" : "text-danger";
 
@@ -141,11 +138,10 @@ public class UserService {
                 "<ul class='audit-list'><li><i class='fa-solid fa-power-off %s me-1'></i> <b>Status Change:</b> User <b>%s</b> was %s</li></ul>",
                 color, user.getEmail(), status);
 
-        // 5. Pass the 'performer' entity, NOT just the email string
         auditService.logAction("USERS", "USER_STATUS_TOGGLE", id, logDetails, performer);
     }
 
-    // --- HELPER: Auto Compare (Mirroring TaskService logic) ---
+    // --- HELPER: Auto Compare ---
     private void autoCompareUsers(StringBuilder builder, String field, String oldVal, String newVal) {
         String safeOld = (oldVal == null) ? "" : oldVal.trim();
         String safeNew = (newVal == null) ? "" : newVal.trim();
@@ -170,6 +166,87 @@ public class UserService {
         }
     }
 
+    // 2. ADD THIS METHOD: Update Personal Profile
+    @Transactional
+    public User updateMyProfile(String email, UserRequestDTO dto) {
+        User existing = userRepository.findByEmail(email)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+
+        StringBuilder logBuilder = new StringBuilder("<ul class='audit-list'>");
+
+        autoCompareUsers(logBuilder, "First Name", existing.getFirstName(), dto.getFirstName());
+        autoCompareUsers(logBuilder, "Last Name", existing.getLastName(), dto.getLastName());
+        autoCompareUsers(logBuilder, "Phone", existing.getPhone(), dto.getPhone());
+        autoCompareUsers(logBuilder, "Location", existing.getLocation(), dto.getLocation());
+
+        String oldBio = existing.getBio() == null ? "" : existing.getBio();
+        String newBio = dto.getBio() == null ? "" : dto.getBio();
+        if (!oldBio.equals(newBio)) {
+            logBuilder.append("<li><b>Bio:</b> Profile bio was updated.</li>");
+        }
+
+        existing.setFirstName(dto.getFirstName());
+        existing.setLastName(dto.getLastName());
+        existing.setPhone(dto.getPhone());
+        existing.setBio(dto.getBio());
+        existing.setLocation(dto.getLocation());
+
+        if (logBuilder.toString().contains("<li>")) {
+            logBuilder.append("</ul>");
+            auditService.logAction("PROFILE", "PROFILE_UPDATED", existing.getId(),
+                    "<b>[Self Update]</b> " + logBuilder.toString(), email);
+        }
+
+        return userRepository.save(existing);
+    }
+
+    // 3. ADD THIS METHOD: Upload Avatar Image
+    // --- 8. UPLOAD AVATAR ---
+    @Transactional
+    public String updateProfileImage(String email, MultipartFile file) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+
+        // NEW: Check for existing image and delete it from the server
+        if (user.getProfileUrl() != null) {
+            fileStorageService.deleteProfileFile(user.getProfileUrl());
+        }
+
+        // Proceed to save the new image
+        String fileName = fileStorageService.storeProfileFile(file);
+        String fileUrl = "/profiles/" + fileName;
+
+        user.setProfileUrl(fileUrl);
+        userRepository.save(user);
+
+        auditService.logAction("PROFILE", "AVATAR_UPDATED", user.getId(), "User updated their profile picture.", email);
+
+        return fileUrl;
+    }
+
+    // --- 9. CHANGE PASSWORD ---
+    @Transactional
+    public void changePassword(String email, ChangePasswordDTO dto) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+
+        // 1. Verify the current password
+        if (!passwordEncoder.matches(dto.getCurrentPassword(), user.getPassword())) {
+            // Throw a 400 Bad Request if the current password doesn't match
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Incorrect current password");
+        }
+
+        // 2. Encode and set the new password
+        user.setPassword(passwordEncoder.encode(dto.getNewPassword()));
+        userRepository.save(user);
+
+        // 3. Log the security event
+        auditService.logAction("PROFILE", "PASSWORD_CHANGED", user.getId(),
+                "<li><i class='fa-solid fa-shield-halved text-warning me-1'></i> <b>Security:</b> User updated their account password.</li>",
+                email);
+    }
+
+    // 4. UPDATE DTO MAPPING: Add new fields
     private UserResponseDTO mapToDTO(User user) {
         return UserResponseDTO.builder()
                 .id(user.getId())
@@ -180,6 +257,10 @@ public class UserService {
                 .jobTitle(user.getJobTitle())
                 .role(user.getRole().name())
                 .active(user.isActive())
+                .phone(user.getPhone())
+                .bio(user.getBio())
+                .location(user.getLocation())
+                .profileUrl(user.getProfileUrl())
                 .build();
     }
 
@@ -196,4 +277,10 @@ public class UserService {
         return sb.toString().trim();
     }
 
+    // Fetch user by email directly from the security token
+    public UserResponseDTO getUserByEmail(String email) {
+        return userRepository.findByEmail(email)
+                .map(this::mapToDTO)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+    }
 }

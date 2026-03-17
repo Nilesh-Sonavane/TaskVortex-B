@@ -18,4 +18,10 @@ public class UserResponseDTO {
     private String jobTitle;
     private String role;
     private boolean active;
+
+    // NEW FIELDS ADDED
+    private String phone;
+    private String bio;
+    private String location;
+    private String profileUrl;
 }
