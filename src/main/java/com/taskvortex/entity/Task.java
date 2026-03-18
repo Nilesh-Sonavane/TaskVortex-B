@@ -50,6 +50,12 @@ public class Task {
     @Column(nullable = false)
     private TaskPriority priority;
 
+    @Column(name = "task_points")
+    private Integer taskPoints;
+
+    @Column(name = "working_hours")
+    private Double workingHours;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private TaskStatus status = TaskStatus.NOT_STARTED;

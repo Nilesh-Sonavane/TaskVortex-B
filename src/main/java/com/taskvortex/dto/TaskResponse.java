@@ -18,6 +18,8 @@ public class TaskResponse {
     private Long projectId;
     private String projectKey;
     private String dept;
+    private Integer taskPoints;
+    private Double workingHours;
     private Long assigneeId;
     private String createdBy;
     private String creatorEmail;

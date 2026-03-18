@@ -101,6 +101,12 @@ public class TaskService {
         autoCompare(logBuilder, "Due Date",
                 existing.getDueDate() != null ? existing.getDueDate().toString() : "None",
                 taskDetails.getDueDate() != null ? taskDetails.getDueDate().toString() : "None");
+        autoCompare(logBuilder, "Task Points",
+                existing.getTaskPoints() == null ? "None" : String.valueOf(existing.getTaskPoints()),
+                taskDetails.getTaskPoints() == null ? "None" : String.valueOf(taskDetails.getTaskPoints()));
+        autoCompare(logBuilder, "Working Hours",
+                existing.getWorkingHours() == null ? "None" : String.valueOf(existing.getWorkingHours()),
+                taskDetails.getWorkingHours() == null ? "None" : String.valueOf(taskDetails.getWorkingHours()));
 
         if (!java.util.Objects.equals(existing.getAssigneeId(), newAssigneeId)) {
             String oldName = getMemberName(existing.getAssigneeId());
@@ -152,6 +158,8 @@ public class TaskService {
         existing.setStatus(taskDetails.getStatus());
         existing.setPriority(taskDetails.getPriority());
         existing.setDueDate(taskDetails.getDueDate());
+        existing.setTaskPoints(taskDetails.getTaskPoints());
+        existing.setWorkingHours(taskDetails.getWorkingHours());
 
         // --- PERSIST AUDIT LOG ---
         if (logBuilder.toString().contains("<li>")) {
@@ -237,11 +245,12 @@ public class TaskService {
         response.setTitle(task.getTitle());
         response.setDescription(task.getDescription());
         response.setStatus(task.getStatus() != null ? task.getStatus().name() : "PENDING");
+        response.setTaskPoints(task.getTaskPoints());
+        response.setWorkingHours(task.getWorkingHours());
         if (task.getProject() != null) {
             response.setProject(task.getProject().getName());
             response.setProjectId(task.getProject().getId());
             response.setProjectKey(task.getProject().getProjectKey());
-
             // DYNAMIC DEPT ASSIGNMENT: Pulling from the Project
             String dept = (task.getProject().getDepartment() != null)
                     ? task.getProject().getDepartment().getName()
