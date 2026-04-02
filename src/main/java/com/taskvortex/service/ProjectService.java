@@ -235,8 +235,10 @@ public class ProjectService {
                                 .build();
         }
 
-        public List<ProjectResponse> getProjectsByManagerId(Long managerId) {
-                return projectRepository.findByManagerId(managerId).stream().map(this::mapToResponse).toList();
+        public List<ProjectResponse> getProjectsByManager(Long managerId) {
+                List<Project> projects = projectRepository.findByManagerId(managerId);
+                return projects.stream().map(this::mapToResponse) // Or however you map to your DTO
+                                .toList();
         }
 
         public List<ProjectResponse> getProjectsByUserId(Long userId) {

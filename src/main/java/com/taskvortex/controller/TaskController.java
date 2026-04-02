@@ -72,12 +72,12 @@ public class TaskController {
 
     @GetMapping("/{id}/history")
     public ResponseEntity<List<AuditLog>> getTaskHistory(@PathVariable Long id) {
-        // We check if the task exists first for validation
+        // 1. Validate task exists
         taskRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Task not found"));
 
-        // Since entityId is removed, we can only fetch logs by the Entity Name "TASKS"
-        // This will return the history of ALL tasks, newest first
+        // 2. Revert to original code: Send all task logs, and let the new Angular
+        // filter sort them!
         return ResponseEntity.ok(auditLogRepository.findByEntityNameOrderByTimestampDesc("TASKS"));
     }
 

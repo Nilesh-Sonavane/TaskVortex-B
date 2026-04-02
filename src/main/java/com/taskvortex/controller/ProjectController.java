@@ -82,6 +82,13 @@ public class ProjectController {
         return ResponseEntity.ok(projectService.getProjectsByUserId(userId));
     }
 
+    @GetMapping("/manager/{managerId}")
+    public ResponseEntity<List<ProjectResponse>> getProjectsByManager(@PathVariable Long managerId) {
+        // Fetch the projects where this user is the manager
+        List<ProjectResponse> projects = projectService.getProjectsByManager(managerId);
+        return ResponseEntity.ok(projects);
+    }
+
     // 6. ARCHIVE / RESTORE Project
     @PatchMapping("/{id}/status")
     public ResponseEntity<?> updateStatus(

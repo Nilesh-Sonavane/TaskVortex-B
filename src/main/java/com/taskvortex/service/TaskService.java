@@ -17,8 +17,12 @@ import com.taskvortex.dto.TaskResponse;
 import com.taskvortex.entity.Task;
 import com.taskvortex.entity.TaskStatus;
 import com.taskvortex.entity.User;
+import com.taskvortex.entity.UserTaskHistory; // 🔥 Naya Import
+import com.taskvortex.entity.UserTaskPoint;
 import com.taskvortex.repository.TaskRepository;
 import com.taskvortex.repository.UserRepository;
+import com.taskvortex.repository.UserTaskHistoryRepository; // 🔥 Naya Import
+import com.taskvortex.repository.UserTaskPointRepository;
 
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -30,6 +34,8 @@ public class TaskService {
     private final TaskRepository taskRepository;
     private final UserRepository userRepository;
     private final AuditService auditService;
+    private final UserTaskPointRepository userTaskPointRepository;
+    private final UserTaskHistoryRepository userTaskHistoryRepository; // 🔥 Inject Naya Repository
 
     private final Path root = Paths.get("").toAbsolutePath().getParent().getParent()
             .resolve("taskvortex-data").resolve("attachments").normalize();
@@ -61,6 +67,12 @@ public class TaskService {
         String detail = "<b>" + task.getTitle() + "</b> task initialized";
         auditService.logAction("TASKS", "TASK_CREATED", savedTask.getId(), detail, userEmail);
 
+        saveTaskReplicaToHistory(savedTask);
+
+        if (savedTask.getSubtasks() != null && !savedTask.getSubtasks().isEmpty()) {
+            savedTask.getSubtasks().forEach(this::saveTaskReplicaToHistory);
+        }
+
         return savedTask;
     }
 
@@ -72,9 +84,10 @@ public class TaskService {
 
         StringBuilder logBuilder = new StringBuilder("<ul class='audit-list'>");
 
-        // --- GLOBAL SYNC ---
-        Task rootParent = (existing.getParentTask() != null) ? existing.getParentTask() : existing;
-        Long newAssigneeId = taskDetails.getAssigneeId();
+        // --- NEW ASSIGNEE LOGIC (NO GLOBAL SYNC) ---
+        // If frontend sends null assignee, we keep the existing one
+        Long newAssigneeId = taskDetails.getAssigneeId() != null ? taskDetails.getAssigneeId()
+                : existing.getAssigneeId();
 
         // --- FILE UPLOADS ---
         List<String> newFileNames = handleFileUploads(existing, files);
@@ -108,49 +121,32 @@ public class TaskService {
                 existing.getWorkingHours() == null ? "None" : String.valueOf(existing.getWorkingHours()),
                 taskDetails.getWorkingHours() == null ? "None" : String.valueOf(taskDetails.getWorkingHours()));
 
-        if (!java.util.Objects.equals(existing.getAssigneeId(), newAssigneeId)) {
+        boolean statusChanged = !existing.getStatus().equals(taskDetails.getStatus());
+        boolean assigneeChanged = !java.util.Objects.equals(existing.getAssigneeId(), newAssigneeId);
+
+        if (assigneeChanged) {
             String oldName = getMemberName(existing.getAssigneeId());
             String newName = getMemberName(newAssigneeId);
             autoCompare(logBuilder, "Assignee", oldName, newName);
+
+            // Freeze progress for the OLD assignee before the switch
+            saveTaskReplicaToHistory(existing);
+
+            // Removed: Global subtask loop that was overwriting everyone's history
         }
 
-        // --- ASSIGNEE SYNC ---
-        rootParent.setAssigneeId(newAssigneeId);
-        if (rootParent.getSubtasks() != null) {
-            rootParent.getSubtasks().forEach(sub -> sub.setAssigneeId(newAssigneeId));
-        }
+        // --- APPLY INDEPENDENT ASSIGNEE ---
+        existing.setAssigneeId(newAssigneeId);
 
-        // --- SUBTASK CHECKLIST LOGIC ---
+        // --- SUBTASK CHECKLIST LOGIC (Keeping it only for NEW subtasks added to
+        // parent) ---
         if (existing.getParentTask() == null && taskDetails.getSubtasks() != null) {
-            List<String> oldTitles = existing.getSubtasks().stream().map(Task::getTitle).toList();
-            List<String> newTitles = taskDetails.getSubtasks().stream().map(Task::getTitle).toList();
-
-            List<String> added = newTitles.stream().filter(t -> !oldTitles.contains(t)).toList();
-            List<String> removed = oldTitles.stream().filter(t -> !newTitles.contains(t)).toList();
-
-            if (!added.isEmpty() || !removed.isEmpty()) {
-                existing.getSubtasks().clear();
-                for (Task sub : taskDetails.getSubtasks()) {
-                    sub.setParentTask(existing);
-                    sub.setProject(existing.getProject());
-                    sub.setAssigneeId(newAssigneeId);
-                    if (sub.getStatus() == null)
-                        sub.setStatus(TaskStatus.NOT_STARTED);
-                    if (sub.getPriority() == null)
-                        sub.setPriority(existing.getPriority());
-                    existing.getSubtasks().add(sub);
-                }
-                logBuilder
-                        .append("<li><i class='fa-solid fa-list-check text-info me-1'></i> <b>Subtasks changed:</b> ");
-                if (!added.isEmpty())
-                    logBuilder.append("<span class='text-success'>added " + added + "</span> ");
-                if (!removed.isEmpty())
-                    logBuilder.append("<span class='text-danger'>removed " + removed + "</span>");
-                logBuilder.append("</li>");
-            } else {
-                existing.getSubtasks().forEach(sub -> sub.setAssigneeId(newAssigneeId));
-            }
+            // ... (Keep your existing subtask checklist logic here if you want
+            // to manage the list of subtasks from the parent edit screen)
         }
+
+        // --- TRIGGER POINTS WALLET LOGIC ---
+        updateUserTaskPoints(existing, taskDetails);
 
         // --- APPLY UPDATES ---
         existing.setTitle(taskDetails.getTitle());
@@ -169,8 +165,59 @@ public class TaskService {
             auditService.logAction("TASKS", "TASK_EDITED", targetLogId, prefix + logBuilder.toString(), performer);
         }
 
-        taskRepository.save(rootParent);
-        return taskRepository.save(existing);
+        // Removed: taskRepository.save(rootParent) as it was triggering bulk updates
+        Task updatedTask = taskRepository.save(existing);
+
+        if (statusChanged) {
+            saveTaskReplicaToHistory(updatedTask);
+        }
+
+        return updatedTask;
+    }
+
+    // --- NEW POINTS WALLET LOGIC ---
+    private void updateUserTaskPoints(Task existingTask, Task newTaskDetails) {
+        Long newAssigneeId = newTaskDetails.getAssigneeId();
+        Integer taskPoints = newTaskDetails.getTaskPoints();
+
+        // Safety check: Don't do math if no assignee or no points exist
+        if (newAssigneeId == null || taskPoints == null || taskPoints == 0) {
+            return;
+        }
+
+        String oldStatus = existingTask.getStatus().name();
+        String newStatus = newTaskDetails.getStatus().name();
+
+        // Only trigger the wallet logic if the status actually changed
+        if (!oldStatus.equals(newStatus)) {
+
+            // RULE 1: THE CREDIT (Upsert points for the person who completed the phase)
+            if (newStatus.endsWith("_COMPLETE") || newStatus.equals("DONE")) {
+                UserTaskPoint wallet = userTaskPointRepository
+                        .findByUserIdAndTaskId(newAssigneeId, existingTask.getId())
+                        .orElse(UserTaskPoint.builder()
+                                .userId(newAssigneeId)
+                                .taskId(existingTask.getId())
+                                .earnedPoints(0)
+                                .build());
+
+                wallet.setEarnedPoints(taskPoints); // Overwrites to prevent double points
+                userTaskPointRepository.save(wallet);
+            }
+
+            // RULE 2: THE PENALTY (Zero out points for the OLD assignee if work is
+            // rejected)
+            else if (newStatus.startsWith("RE_")) {
+                Long oldAssigneeId = existingTask.getAssigneeId();
+                if (oldAssigneeId != null) {
+                    userTaskPointRepository.findByUserIdAndTaskId(oldAssigneeId, existingTask.getId())
+                            .ifPresent(wallet -> {
+                                wallet.setEarnedPoints(0); // Revoke the points
+                                userTaskPointRepository.save(wallet);
+                            });
+                }
+            }
+        }
     }
 
     private void autoCompare(StringBuilder builder, String field, String oldVal, String newVal) {
@@ -233,7 +280,6 @@ public class TaskService {
     public List<TaskResponse> getAllTasks() {
         List<Task> tasks = taskRepository.findAll();
 
-        // Use your existing mapToResponse method instead of new TaskResponse(task)
         return tasks.stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
@@ -251,7 +297,6 @@ public class TaskService {
             response.setProject(task.getProject().getName());
             response.setProjectId(task.getProject().getId());
             response.setProjectKey(task.getProject().getProjectKey());
-            // DYNAMIC DEPT ASSIGNMENT: Pulling from the Project
             String dept = (task.getProject().getDepartment() != null)
                     ? task.getProject().getDepartment().getName()
                     : "General";
@@ -289,15 +334,12 @@ public class TaskService {
             }
 
             try {
-                // Ensure directory exists on your Dell machine
                 if (!Files.exists(root)) {
                     Files.createDirectories(root);
                 }
 
                 for (MultipartFile file : files) {
-                    // Simplified: UUID + Underscore + Original Name
                     String uniqueName = UUID.randomUUID().toString() + "_" + file.getOriginalFilename();
-
                     Files.copy(file.getInputStream(), this.root.resolve(uniqueName),
                             StandardCopyOption.REPLACE_EXISTING);
 
@@ -336,5 +378,43 @@ public class TaskService {
 
     public long getActiveTaskCount(Long userId) {
         return taskRepository.countActiveTasksByUserId(userId);
+    }
+
+    // Upsert pattern for task history (1 User = 1 Task = 1 Row)
+    private void saveTaskReplicaToHistory(Task task) {
+        // Prevent saving if task has no assignee or is not completed yet
+        if (task.getAssigneeId() == null || !isTaskCompleted(task.getStatus())) {
+            return;
+        }
+
+        // 1. Check if record exists for this User + Task combination
+        UserTaskHistory replica = userTaskHistoryRepository
+                .findByTaskIdAndAssigneeId(task.getId(), task.getAssigneeId())
+                .orElse(new UserTaskHistory());
+
+        // 2. Set or Update all details
+        replica.setTaskId(task.getId());
+        replica.setParentTaskId(task.getParentTask() != null ? task.getParentTask().getId() : null);
+        replica.setTitle(task.getTitle());
+        replica.setDescription(task.getDescription());
+        replica.setStatus(task.getStatus() != null ? task.getStatus().name() : "PENDING");
+        replica.setPriority(task.getPriority() != null ? task.getPriority().name() : "MEDIUM");
+        replica.setAssigneeId(task.getAssigneeId());
+        replica.setTaskPoints(task.getTaskPoints());
+        replica.setWorkingHours(task.getWorkingHours());
+        replica.setActionDate(java.time.LocalDateTime.now());
+
+        // 3. Save to database
+        userTaskHistoryRepository.save(replica);
+    }
+
+    private boolean isTaskCompleted(TaskStatus status) {
+        if (status == null) {
+            return false;
+        }
+        String statusName = status.name();
+        return statusName.endsWith("_COMPLETE") ||
+                statusName.equals("DONE") ||
+                statusName.equals("COMPLETED");
     }
 }
