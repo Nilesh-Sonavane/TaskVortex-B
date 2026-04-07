@@ -45,6 +45,7 @@ public class User implements UserDetails {
     @Column(unique = true, nullable = false)
     private String email;
 
+    @Column(unique = true)
     private String phone;
 
     @Column(length = 500)

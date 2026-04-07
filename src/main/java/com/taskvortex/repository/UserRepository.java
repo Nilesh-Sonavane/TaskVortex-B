@@ -25,4 +25,6 @@ public interface UserRepository extends JpaRepository<User, Long> {
             "(SELECT t.assigneeId FROM Task t WHERE t.project.manager.id = :managerId)")
     List<User> findTeamMembersByManagerId(@Param("managerId") Long managerId);
 
+    Optional<User> findByPhone(String phone);
+
 }

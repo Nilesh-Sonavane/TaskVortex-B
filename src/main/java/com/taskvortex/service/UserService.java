@@ -172,6 +172,15 @@ public class UserService {
         User existing = userRepository.findByEmail(email)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
 
+        if (dto.getPhone() != null && !dto.getPhone().isBlank()) {
+            userRepository.findByPhone(dto.getPhone()).ifPresent(otherUser -> {
+                if (!otherUser.getEmail().equals(email)) {
+                    throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                            "Phone number already registered with another account");
+                }
+            });
+        }
+
         StringBuilder logBuilder = new StringBuilder("<ul class='audit-list'>");
 
         autoCompareUsers(logBuilder, "First Name", existing.getFirstName(), dto.getFirstName());

@@ -72,4 +72,57 @@ public class TimeLogController {
 
         return ResponseEntity.ok(response);
     }
+
+    // --- TIMER ENDPOINTS ---
+
+    @PostMapping("/task/{taskId}/user/{userId}/start-timer")
+    public ResponseEntity<?> startTimer(@PathVariable Long taskId, @PathVariable Long userId) {
+        try {
+            com.taskvortex.entity.ActiveTimer timer = timeLogService.startTimer(taskId, userId);
+            Map<String, Object> response = new HashMap<>();
+            response.put("id", timer.getId());
+            response.put("startTime", timer.getStartTime().toString());
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    @PostMapping("/task/{taskId}/user/{userId}/stop-timer")
+    public ResponseEntity<?> stopTimer(
+            @PathVariable Long taskId,
+            @PathVariable Long userId,
+            @RequestBody(required = false) Map<String, String> payload) {
+        try {
+            String desc = (payload != null && payload.containsKey("description")) ? payload.get("description")
+                    : "Work completed via Timer";
+
+            TimeLog savedLog = timeLogService.stopTimer(taskId, userId, desc);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("id", savedLog.getId());
+            response.put("loggedHours", savedLog.getLoggedHours()); 
+            response.put("description", savedLog.getDescription());
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(e.getMessage());
+        }
+    }
+
+    @GetMapping("/task/{taskId}/user/{userId}/active-timer")
+    public ResponseEntity<?> getActiveTimer(@PathVariable Long taskId, @PathVariable Long userId) {
+        com.taskvortex.entity.ActiveTimer timer = timeLogService.getActiveTimer(taskId, userId);
+
+        if (timer != null) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("id", timer.getId());
+            response.put("startTime", timer.getStartTime().toString());
+            return ResponseEntity.ok(response);
+        }
+
+        return ResponseEntity.ok(null);
+    }
 }

@@ -37,7 +37,7 @@ public class UserController {
 
     @PostMapping("/add")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<User> addNewUser(@RequestBody UserRequestDTO userDTO, Principal principal) {
+    public ResponseEntity<User> addNewUser(@Valid @RequestBody UserRequestDTO userDTO, Principal principal) {
         return ResponseEntity.ok(userService.createUser(userDTO, principal.getName()));
     }
 
@@ -51,7 +51,7 @@ public class UserController {
     // --- NEW: UPDATE USER ---
     @PutMapping("/update/{id}")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<User> updateUser(@PathVariable Long id, @RequestBody UserRequestDTO userDTO,
+    public ResponseEntity<User> updateUser(@PathVariable Long id,@Valid @RequestBody UserRequestDTO userDTO,
             Principal principal) {
         return ResponseEntity.ok(userService.updateUser(id, userDTO, principal.getName()));
     }
